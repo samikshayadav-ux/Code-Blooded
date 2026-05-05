@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { Database, Filter, Network, Radar } from "lucide-react";
+import { AlertTriangle, Database, Filter, GitCompareArrows, Network, Radar, ShieldX } from "lucide-react";
 import { InsightsPanel } from "@/components/insights-panel";
 import { SourceCards } from "@/components/source-cards";
 import { Timeline } from "@/components/timeline";
@@ -25,6 +25,9 @@ export default function Dashboard() {
     () => (filter === "all" ? logs : logs.filter((log) => log.source === filter)),
     [filter, logs]
   );
+  const duplicateCount = logs.filter((log) => log.status === "duplicate").length;
+  const missingCount = logs.filter((log) => log.status === "missing").length;
+  const outOfOrderCount = logs.filter((log) => log.status === "out-of-order").length;
 
   async function loadTimeline(nextFilter: FilterValue = filter) {
     setIsBusy(true);
@@ -97,7 +100,7 @@ export default function Dashboard() {
   }, []);
 
   return (
-    <main className="mx-auto flex min-h-screen w-full max-w-7xl flex-col gap-5 px-4 py-5 sm:px-6 lg:px-8">
+    <main className="mx-auto flex w-full max-w-7xl flex-col gap-5 px-4 py-5 sm:px-6 lg:px-8">
       <header className="flex flex-col gap-4 border-b border-white/10 pb-5 lg:flex-row lg:items-end lg:justify-between">
         <div>
           <div className="mb-3 inline-flex items-center gap-2 rounded-md border border-cyan-200/20 bg-cyan-200/10 px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-cyan-100">
@@ -131,6 +134,59 @@ export default function Dashboard() {
           </div>
         </div>
       </header>
+
+      <section className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+        {[
+          {
+            label: "Out of Order Logs",
+            value: outOfOrderCount,
+            icon: GitCompareArrows,
+            tone: "from-emerald-400/22 to-cyan-400/10 text-emerald-200",
+            badge: "OK"
+          },
+          {
+            label: "Duplicate Logs",
+            value: duplicateCount,
+            icon: AlertTriangle,
+            tone: "from-amber-400/24 to-orange-400/10 text-amber-200",
+            badge: "Watch"
+          },
+          {
+            label: "Missing Logs",
+            value: missingCount,
+            icon: ShieldX,
+            tone: "from-rose-400/24 to-red-400/10 text-rose-200",
+            badge: "Risk"
+          },
+          {
+            label: "Total Logs Processed",
+            value: logs.length,
+            icon: Database,
+            tone: "from-sky-400/24 to-indigo-400/10 text-sky-200",
+            badge: "Live"
+          }
+        ].map((card, index) => {
+          const Icon = card.icon;
+          return (
+            <article
+              key={card.label}
+              className={`animate-rise-in rounded-lg border border-white/10 bg-gradient-to-br ${card.tone} p-4 shadow-glow transition duration-300 hover:-translate-y-0.5 hover:border-white/20`}
+              style={{ animationDelay: `${index * 55}ms` }}
+            >
+              <div className="flex items-center justify-between">
+                <div className="flex size-10 items-center justify-center rounded-md bg-white/10">
+                  <Icon size={20} aria-hidden />
+                </div>
+                <span className="rounded-md bg-black/20 px-2 py-1 text-xs font-semibold text-slate-100">
+                  {card.badge}
+                </span>
+              </div>
+              <p className="mt-4 text-3xl font-semibold text-white">{card.value}</p>
+              <p className="mt-1 text-sm font-medium text-slate-300">{card.label}</p>
+            </article>
+          );
+        })}
+      </section>
 
       <UploadPanel
         isBusy={isBusy}

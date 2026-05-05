@@ -82,3 +82,33 @@ export async function replaceProcessedLogs(logs: LogRecord[]) {
   await db.collection(COLLECTION).deleteMany({});
   return insertLogs(logs);
 }
+
+export async function updateLog(id: string, log: LogRecord) {
+  const db = await getDb();
+  await ensureLogIndexes();
+
+  const { _id, createdAt, updatedAt, ...updateableLog } = log;
+  void _id;
+  void createdAt;
+  void updatedAt;
+
+  await db.collection(COLLECTION).updateOne(
+    { _id: new ObjectId(id) },
+    {
+      $set: {
+        ...updateableLog,
+        updatedAt: new Date()
+      }
+    }
+  );
+
+  const updated = await db.collection(COLLECTION).findOne({ _id: new ObjectId(id) });
+  return updated ? serializeLog(updated) : null;
+}
+
+export async function deleteLog(id: string) {
+  const db = await getDb();
+  await ensureLogIndexes();
+  const result = await db.collection(COLLECTION).deleteOne({ _id: new ObjectId(id) });
+  return result.deletedCount === 1;
+}
