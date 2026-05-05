@@ -1,0 +1,6 @@
+source,event,rawTimestamp,eventId,correlationId,sequence,userId,amount,currency,sku,template
+Auth Service,user.login,2026-05-05T03:40:00-04:00,evt-001,order-8841,1,usr_1024,,,,
+Payment Service,payment.authorized,2026-05-05T07:40:04Z,evt-002,order-8841,2,,149.99,USD,,
+Inventory Service,stock.reserved,2026-05-05T07:39:59Z,evt-003,order-8841,4,,,,DLR-14,
+Notification Service,email.queued,2026-05-05T07:40:08Z,evt-004,order-8841,5,,,,,receipt
+Payment Service,payment.authorized,2026-05-05T07:40:04Z,evt-002,order-8841,2,,149.99,USD,,

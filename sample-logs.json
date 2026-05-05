@@ -1,0 +1,51 @@
+[
+  {
+    "source": "Auth Service",
+    "event": "user.login",
+    "rawTimestamp": "2026-05-05T03:40:00-04:00",
+    "eventId": "evt-001",
+    "correlationId": "order-8841",
+    "sequence": 1,
+    "userId": "usr_1024",
+    "ip": "203.0.113.24"
+  },
+  {
+    "source": "Payment Service",
+    "event": "payment.authorized",
+    "rawTimestamp": "2026-05-05T07:40:04Z",
+    "eventId": "evt-002",
+    "correlationId": "order-8841",
+    "sequence": 2,
+    "amount": 149.99,
+    "currency": "USD"
+  },
+  {
+    "source": "Inventory Service",
+    "event": "stock.reserved",
+    "rawTimestamp": "2026-05-05T07:39:59Z",
+    "eventId": "evt-003",
+    "correlationId": "order-8841",
+    "sequence": 4,
+    "sku": "DLR-14"
+  },
+  {
+    "source": "Notification Service",
+    "event": "email.queued",
+    "rawTimestamp": "2026-05-05T07:40:08Z",
+    "eventId": "evt-004",
+    "correlationId": "order-8841",
+    "sequence": 5,
+    "template": "receipt"
+  },
+  {
+    "source": "Payment Service",
+    "event": "payment.authorized",
+    "rawTimestamp": "2026-05-05T07:40:04Z",
+    "eventId": "evt-002",
+    "correlationId": "order-8841",
+    "sequence": 2,
+    "amount": 149.99,
+    "currency": "USD",
+    "replay": true
+  }
+]
