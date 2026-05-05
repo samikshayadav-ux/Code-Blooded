@@ -9,6 +9,7 @@ import {
   Home,
   Lightbulb,
   ListPlus,
+  LogOut,
   Menu,
   Settings,
   Trash2,
@@ -104,9 +105,10 @@ export function AppShell({ children }: AppShellProps) {
             <ThemeToggle />
             <Link
               href="/login"
-              className="h-10 rounded-md border border-white/10 bg-white/5 px-3 py-2 text-sm font-semibold text-slate-100 transition hover:bg-white/10"
+              className="inline-flex h-10 items-center gap-2 rounded-md border border-white/10 bg-white/5 px-3 py-2 text-sm font-semibold text-slate-100 transition hover:bg-white/10"
             >
-              Login
+              <LogOut size={16} aria-hidden />
+              Logout
             </Link>
           </div>
         </div>

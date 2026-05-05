@@ -1,0 +1,99 @@
+[
+  {
+    "source": "Auth Service",
+    "event": "user.login",
+    "timestamp": "2026-05-05T07:40:00Z",
+    "eventId": "evt-101",
+    "correlationId": "order-5001",
+    "sequence": 1,
+    "metadata": {
+      "userId": "user_101",
+      "ip": "192.168.1.10"
+    }
+  },
+  {
+    "source": "Payment Service",
+    "event": "payment.authorized",
+    "timestamp": "2026-05-05T07:40:05Z",
+    "eventId": "evt-102",
+    "correlationId": "order-5001",
+    "sequence": 2,
+    "metadata": {
+      "amount": 1299,
+      "currency": "INR"
+    }
+  },
+  {
+    "source": "Inventory Service",
+    "event": "stock.reserved",
+    "timestamp": "2026-05-05T07:40:10Z",
+    "eventId": "evt-103",
+    "correlationId": "order-5001",
+    "sequence": 4,
+    "metadata": {
+      "sku": "MOUSE-001",
+      "warehouse": "BLR-01"
+    }
+  },
+  {
+    "source": "Notification Service",
+    "event": "email.queued",
+    "timestamp": "2026-05-05T07:40:15Z",
+    "eventId": "evt-104",
+    "correlationId": "order-5001",
+    "sequence": 5,
+    "metadata": {
+      "template": "order-confirmation"
+    }
+  },
+  {
+    "source": "Payment Service",
+    "event": "payment.authorized",
+    "timestamp": "2026-05-05T07:40:05Z",
+    "eventId": "evt-105",
+    "correlationId": "order-5001",
+    "sequence": 2,
+    "metadata": {
+      "amount": 1299,
+      "currency": "INR",
+      "note": "duplicate test"
+    }
+  },
+  {
+    "source": "Inventory Service",
+    "event": "stock.reserved",
+    "timestamp": "2026-05-05T07:39:58Z",
+    "eventId": "evt-106",
+    "correlationId": "order-5002",
+    "sequence": 3,
+    "metadata": {
+      "sku": "KEYBOARD-002",
+      "warehouse": "HYD-02",
+      "note": "causal gap test"
+    }
+  },
+  {
+    "source": "Auth Service",
+    "event": "user.login",
+    "timestamp": "2026-05-05T07:40:02Z",
+    "eventId": "evt-107",
+    "correlationId": "order-5002",
+    "sequence": 1,
+    "metadata": {
+      "userId": "user_202",
+      "ip": "10.0.0.25"
+    }
+  },
+  {
+    "source": "Payment Service",
+    "event": "payment.authorized",
+    "timestamp": "2026-05-05T07:40:06Z",
+    "eventId": "evt-108",
+    "correlationId": "order-5002",
+    "sequence": 2,
+    "metadata": {
+      "amount": 2499,
+      "currency": "INR"
+    }
+  }
+]

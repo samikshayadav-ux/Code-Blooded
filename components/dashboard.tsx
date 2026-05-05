@@ -64,7 +64,7 @@ export default function Dashboard() {
 
       if (!response.ok) throw new Error(data.error ?? "Upload failed.");
 
-      setStatus(`Inserted ${data.inserted} logs from ${file.name}.`);
+      setStatus(`Inserted ${data.inserted} logs from ${file.name}. Skipped ${data.skipped} duplicate logs.`);
       await loadTimeline("all");
       setFilter("all");
     } catch (error) {

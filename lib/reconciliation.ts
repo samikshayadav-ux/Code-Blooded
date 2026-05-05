@@ -97,7 +97,7 @@ export function toLogRecord(input: RawLogInput): LogRecord {
 }
 
 function fingerprint(log: LogRecord) {
-  return [log.source, log.eventId || log.event, log.normalizedTimestamp, log.correlationId || "none"].join("|");
+  return [log.source, log.event, log.normalizedTimestamp].join("|");
 }
 
 function withConfidence(statuses: Set<LogStatus>, baseConfidence: number) {
@@ -179,10 +179,11 @@ export function reconcileLogs(inputLogs: LogRecord[]) {
     .map((log, index) => {
       statusesByIndex[index].delete("normal");
       const statuses = statusesByIndex[index];
+      const baseConfidence = log.status === "normal" ? log.confidence : 1;
       return {
         ...log,
         status: dominantStatus(statuses),
-        confidence: withConfidence(statuses, log.confidence)
+        confidence: withConfidence(statuses, baseConfidence)
       };
     })
     .sort(
@@ -205,7 +206,7 @@ export function buildInsights(logs: LogRecord[]): AnomalyInsight[] {
     duplicateCount && {
       id: "duplicates",
       title: "Duplicate log signatures",
-      description: `${duplicateCount} records share the same source, event, timestamp, and correlation fingerprint.`,
+      description: `${duplicateCount} records share the same source, event, and normalized timestamp.`,
       severity: duplicateCount > 3 ? "high" : "medium"
     },
     missingCount && {

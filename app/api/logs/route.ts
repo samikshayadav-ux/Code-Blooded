@@ -1,16 +1,22 @@
 import { NextResponse } from "next/server";
-import { deleteLog, insertLogs, updateLog } from "@/lib/logs";
+import { deleteLog, getLogs, insertLogs, replaceProcessedLogs, updateLog } from "@/lib/logs";
 import { reconcileLogs, toLogRecord } from "@/lib/reconciliation";
 
 export const runtime = "nodejs";
+
+async function rebuildTimeline() {
+  const logs = await getLogs();
+  return replaceProcessedLogs(reconcileLogs(logs));
+}
 
 export async function POST(request: Request) {
   try {
     const body = await request.json();
     const [log] = reconcileLogs([toLogRecord(body)]);
     const [created] = await insertLogs([log]);
+    const logs = await rebuildTimeline();
 
-    return NextResponse.json({ log: created }, { status: 201 });
+    return NextResponse.json({ log: created, logs }, { status: 201 });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unable to create log.";
     return NextResponse.json({ error: message }, { status: 400 });
@@ -31,7 +37,9 @@ export async function PATCH(request: Request) {
       return NextResponse.json({ error: "Log not found." }, { status: 404 });
     }
 
-    return NextResponse.json({ log: updated });
+    const logs = await rebuildTimeline();
+
+    return NextResponse.json({ log: updated, logs });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unable to update log.";
     return NextResponse.json({ error: message }, { status: 400 });
@@ -52,7 +60,9 @@ export async function DELETE(request: Request) {
       return NextResponse.json({ error: "Log not found." }, { status: 404 });
     }
 
-    return NextResponse.json({ deleted: true });
+    const logs = await rebuildTimeline();
+
+    return NextResponse.json({ deleted: true, logs });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unable to delete log.";
     return NextResponse.json({ error: message }, { status: 400 });
