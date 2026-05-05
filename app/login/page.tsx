@@ -36,7 +36,7 @@ export default function LoginPage() {
           setError("Account created successfully. Please log in.");
           setTab("login");
         } else {
-          window.location.href = "/";
+          window.location.href = "/dashboard";
         }
       } else {
         setError(data.error || "Failed");
@@ -55,7 +55,7 @@ export default function LoginPage() {
       </div>
 
       <section className="w-full max-w-md animate-rise-in rounded-lg border border-white/15 bg-white/[0.08] p-6 shadow-2xl backdrop-blur-2xl">
-        <Link href="/" className="mb-6 inline-flex items-center gap-3">
+        <Link href="/login" className="mb-6 inline-flex items-center gap-3">
           <span className="flex size-11 items-center justify-center rounded-md bg-cyan-300 text-sm font-black text-slate-950">
             DL
           </span>

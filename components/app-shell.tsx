@@ -18,7 +18,7 @@ import { useState } from "react";
 import { ThemeToggle } from "@/components/theme-toggle";
 
 const navItems = [
-  { href: "/", label: "Dashboard", icon: Home },
+  { href: "/dashboard", label: "Dashboard", icon: Home },
   { href: "/timeline", label: "Timeline", icon: Workflow },
   { href: "/logs", label: "Logs", icon: BarChart3 },
   { href: "/logs?mode=create", label: "Add Log", icon: ListPlus, child: true },
@@ -44,7 +44,7 @@ export function AppShell({ children }: AppShellProps) {
         }`}
       >
         <div className="mb-5 flex items-center justify-between">
-          <Link href="/" className="flex min-w-0 items-center gap-3">
+          <Link href="/dashboard" className="flex min-w-0 items-center gap-3">
             <span className="flex size-10 items-center justify-center rounded-md bg-cyan-300 text-sm font-black text-slate-950">
               DL
             </span>
@@ -67,7 +67,7 @@ export function AppShell({ children }: AppShellProps) {
         <nav className="space-y-1">
           {navItems.map((item) => {
             const Icon = item.icon;
-            const active = item.href === "/" ? pathname === "/" : pathname.startsWith(item.href.split("?")[0]);
+            const active = pathname.startsWith(item.href.split("?")[0]);
 
             return (
               <Link

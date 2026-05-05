@@ -1,10 +1,5 @@
-import { AppShell } from "@/components/app-shell";
-import Dashboard from "@/components/dashboard";
+import { redirect } from "next/navigation";
 
 export default function Home() {
-  return (
-    <AppShell>
-      <Dashboard />
-    </AppShell>
-  );
+  redirect("/login");
 }
