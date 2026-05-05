@@ -2,11 +2,51 @@
 
 import Link from "next/link";
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import { LockKeyhole, Mail, UserRound } from "lucide-react";
 import { ThemeToggle } from "@/components/theme-toggle";
 
 export default function LoginPage() {
   const [tab, setTab] = useState<"login" | "signup">("login");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [username, setUsername] = useState("");
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
+  const router = useRouter();
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError("");
+    setLoading(true);
+
+    const endpoint = tab === "signup" ? "/api/signup" : "/api/login";
+
+    try {
+      const response = await fetch(endpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(tab === "signup" ? { email, password, username } : { email, password }),
+      });
+
+      const data = await response.json();
+
+      if (response.ok && data.success) {
+        if (tab === "signup") {
+          setError("Account created successfully. Please log in.");
+          setTab("login");
+        } else {
+          window.location.href = "/";
+        }
+      } else {
+        setError(data.error || "Failed");
+      }
+    } catch (err) {
+      setError("Network error");
+    } finally {
+      setLoading(false);
+    }
+  };
 
   return (
     <main className="flex min-h-screen items-center justify-center px-4 py-10">
@@ -49,13 +89,18 @@ export default function LoginPage() {
             : "Start a new account for the reconciliation dashboard."}
         </p>
 
-        <form className="mt-6 space-y-4">
+        <form onSubmit={handleSubmit} className="mt-6 space-y-4">
           {tab === "signup" && (
             <label className="block text-sm font-medium text-slate-300">
               Username
               <span className="mt-2 flex h-11 items-center gap-2 rounded-md border border-white/10 bg-slate-950/55 px-3">
                 <UserRound size={17} className="text-cyan-200" aria-hidden />
-                <input className="min-w-0 flex-1 bg-transparent text-sm text-slate-100 outline-none" placeholder="sam" />
+                <input
+                  className="min-w-0 flex-1 bg-transparent text-sm text-slate-100 outline-none"
+                  placeholder="sam"
+                  value={username}
+                  onChange={(e) => setUsername(e.target.value)}
+                />
               </span>
             </label>
           )}
@@ -64,7 +109,14 @@ export default function LoginPage() {
             Email
             <span className="mt-2 flex h-11 items-center gap-2 rounded-md border border-white/10 bg-slate-950/55 px-3">
               <Mail size={17} className="text-cyan-200" aria-hidden />
-              <input className="min-w-0 flex-1 bg-transparent text-sm text-slate-100 outline-none" placeholder="you@example.com" type="email" />
+              <input
+                className="min-w-0 flex-1 bg-transparent text-sm text-slate-100 outline-none"
+                placeholder="you@example.com"
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                required
+              />
             </span>
           </label>
 
@@ -72,15 +124,26 @@ export default function LoginPage() {
             Password
             <span className="mt-2 flex h-11 items-center gap-2 rounded-md border border-white/10 bg-slate-950/55 px-3">
               <LockKeyhole size={17} className="text-cyan-200" aria-hidden />
-              <input className="min-w-0 flex-1 bg-transparent text-sm text-slate-100 outline-none" placeholder="••••••••" type="password" />
+              <input
+                className="min-w-0 flex-1 bg-transparent text-sm text-slate-100 outline-none"
+                placeholder="••••••••"
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                required
+              />
             </span>
           </label>
 
+          {error && <p className="text-sm text-red-400">{error}</p>}
+
           <button
-            type="button"
-            className="h-11 w-full rounded-md bg-cyan-300 text-sm font-semibold text-slate-950 transition hover:bg-cyan-200"
+            type="submit"
+            onClick={handleSubmit}
+            disabled={loading}
+            className="h-11 w-full rounded-md bg-cyan-300 text-sm font-semibold text-slate-950 transition hover:bg-cyan-200 disabled:opacity-50"
           >
-            {tab === "login" ? "Login" : "Sign up"}
+            {loading ? "Loading..." : tab === "login" ? "Login" : "Sign up"}
           </button>
         </form>
       </section>
