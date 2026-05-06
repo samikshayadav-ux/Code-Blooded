@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { Filter } from "lucide-react";
+import { ChevronDown, Filter } from "lucide-react";
 import { Timeline } from "@/components/timeline";
 import { LOG_SOURCES, type LogRecord, type LogSource } from "@/lib/types";
 
@@ -37,19 +37,23 @@ export function TimelinePage() {
           <Filter size={17} className="text-cyan-200" aria-hidden />
           Filter by source
         </div>
-        <div className="flex flex-wrap gap-2">
-          {(["all", ...LOG_SOURCES] as FilterValue[]).map((source) => (
-            <button
-              key={source}
-              type="button"
-              onClick={() => setFilter(source)}
-              className={`h-9 rounded-md px-3 text-xs font-semibold transition ${
-                filter === source ? "bg-cyan-300 text-slate-950" : "border border-white/10 bg-white/5 text-slate-300 hover:bg-white/10"
-              }`}
-            >
-              {source === "all" ? "All sources" : source}
-            </button>
-          ))}
+        <div className="relative w-full sm:w-72">
+          <select
+            value={filter}
+            onChange={(event) => setFilter(event.target.value as FilterValue)}
+            className="h-11 w-full appearance-none rounded-md border border-white/10 bg-slate-950/60 px-3 pr-10 text-sm font-semibold text-slate-100 outline-none transition hover:bg-white/8 focus:border-cyan-200"
+          >
+            {(["all", ...LOG_SOURCES] as FilterValue[]).map((source) => (
+              <option key={source} value={source}>
+                {source === "all" ? "All sources" : source}
+              </option>
+            ))}
+          </select>
+          <ChevronDown
+            size={17}
+            className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-cyan-200"
+            aria-hidden
+          />
         </div>
       </section>
 
