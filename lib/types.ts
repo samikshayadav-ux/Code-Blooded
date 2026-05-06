@@ -12,7 +12,10 @@ export type LogStatus =
   | "duplicate"
   | "missing"
   | "out-of-order"
-  | "causal-gap";
+  | "causal-gap"
+  | "predicted"
+  | "timestamp-conflict"
+  | "metadata-missing";
 
 export type LogRecord = {
   _id?: string;
@@ -23,6 +26,8 @@ export type LogRecord = {
   metadata: Record<string, unknown>;
   confidence: number;
   status: LogStatus;
+  predicted?: boolean;
+  reconciliationNotes?: string[];
   eventId?: string;
   correlationId?: string;
   sequence?: number;
@@ -34,6 +39,7 @@ export type TimelineResponse = {
   logs: LogRecord[];
   insights: AnomalyInsight[];
   sourceStats: SourceStat[];
+  summary?: ReconciliationSummary;
 };
 
 export type AnomalyInsight = {
@@ -42,6 +48,7 @@ export type AnomalyInsight = {
   description: string;
   severity: "low" | "medium" | "high";
   source?: LogSource;
+  correlationId?: string;
 };
 
 export type SourceStat = {
@@ -56,4 +63,32 @@ export type UploadResult = {
   inserted: number;
   skipped: number;
   logs: LogRecord[];
+};
+
+export type ReconciliationSummary = {
+  rawCount: number;
+  cleanedCount: number;
+  duplicatesRemoved: number;
+  eventsReordered: number;
+  missingEventsInferred: number;
+  timestampConflictsResolved: number;
+  missingCorrelationIds: number;
+  missingMetadata: number;
+  rawConfidenceScore: number;
+  reconciledConfidenceScore: number;
+  rawConfidenceColor: "green" | "yellow" | "red";
+  reconciledConfidenceColor: "green" | "yellow" | "red";
+  confidenceScore: number;
+  confidenceColor: "green" | "yellow" | "red";
+  rawSequence: string[];
+  reconciledSequence: string[];
+  lowConfidenceReasons: string[];
+};
+
+export type ReconciliationRun = {
+  rawLogs: LogRecord[];
+  cleanedLogs: LogRecord[];
+  insights: AnomalyInsight[];
+  sourceStats: SourceStat[];
+  summary: ReconciliationSummary;
 };

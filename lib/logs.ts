@@ -4,10 +4,6 @@ import type { LogRecord } from "@/lib/types";
 
 const COLLECTION = "logs";
 
-function logFingerprint(log: Pick<LogRecord, "source" | "event" | "normalizedTimestamp">) {
-  return [log.source, log.event, log.normalizedTimestamp].join("|");
-}
-
 function serializeLog(document: Document): LogRecord {
   return {
     _id: document._id instanceof ObjectId ? document._id.toHexString() : String(document._id),
@@ -42,32 +38,9 @@ export async function insertLogs(logs: LogRecord[]) {
   const db = await getDb();
   await ensureLogIndexes();
 
-  const existingLogs = await db
-    .collection(COLLECTION)
-    .find(
-      {},
-      {
-        projection: {
-          source: 1,
-          event: 1,
-          normalizedTimestamp: 1
-        }
-      }
-    )
-    .toArray();
-  const fingerprints = new Set(existingLogs.map((log) => logFingerprint(serializeLog(log))));
-  const uniqueLogs = logs.filter((log) => {
-    const fingerprint = logFingerprint(log);
-    if (fingerprints.has(fingerprint)) return false;
-    fingerprints.add(fingerprint);
-    return true;
-  });
-
-  if (uniqueLogs.length === 0) return [];
-
   const now = new Date();
   const result = await db.collection(COLLECTION).insertMany(
-    uniqueLogs.map((log) => {
+    logs.map((log) => {
       const { _id, createdAt, updatedAt, ...insertableLog } = log;
       void _id;
       void createdAt;
@@ -82,7 +55,7 @@ export async function insertLogs(logs: LogRecord[]) {
   );
 
   return Object.values(result.insertedIds).map((id, index) => ({
-    ...uniqueLogs[index],
+    ...logs[index],
     _id: id.toHexString(),
     createdAt: now.toISOString(),
     updatedAt: now.toISOString()
@@ -101,13 +74,6 @@ export async function getLogs(source?: string) {
     .toArray();
 
   return logs.map(serializeLog);
-}
-
-export async function replaceProcessedLogs(logs: LogRecord[]) {
-  const db = await getDb();
-  await ensureLogIndexes();
-  await db.collection(COLLECTION).deleteMany({});
-  return insertLogs(logs);
 }
 
 export async function updateLog(id: string, log: LogRecord) {

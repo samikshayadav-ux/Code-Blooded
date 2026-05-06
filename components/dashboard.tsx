@@ -25,9 +25,9 @@ export default function Dashboard() {
     () => (filter === "all" ? logs : logs.filter((log) => log.source === filter)),
     [filter, logs]
   );
-  const duplicateCount = logs.filter((log) => log.status === "duplicate").length;
-  const missingCount = logs.filter((log) => log.status === "missing").length;
-  const outOfOrderCount = logs.filter((log) => log.status === "out-of-order").length;
+  const duplicateCount = timeline.summary?.duplicatesRemoved ?? logs.filter((log) => log.status === "duplicate").length;
+  const missingCount = timeline.summary?.missingEventsInferred ?? logs.filter((log) => log.status === "missing" || log.predicted).length;
+  const outOfOrderCount = timeline.summary?.eventsReordered ?? logs.filter((log) => log.status === "out-of-order").length;
 
   async function loadTimeline(nextFilter: FilterValue = filter) {
     setIsBusy(true);
@@ -203,27 +203,24 @@ export default function Dashboard() {
           <Filter size={17} className="text-cyan-200" aria-hidden />
           Filter by source
         </div>
-        <div className="relative w-full sm:w-72">
-          <select
-            value={filter}
-            onChange={(event) => {
-              const source = event.target.value as FilterValue;
-              setFilter(source);
-              loadTimeline(source);
-            }}
-            className="h-11 w-full appearance-none rounded-md border border-white/10 bg-slate-950/60 px-3 pr-10 text-sm font-semibold text-slate-100 outline-none transition hover:bg-white/8 focus:border-cyan-200"
-          >
-            {(["all", ...LOG_SOURCES] as FilterValue[]).map((source) => (
-              <option key={source} value={source}>
-                {source === "all" ? "All sources" : source}
-              </option>
-            ))}
-          </select>
-          <ChevronDown
-            size={17}
-            className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-cyan-200"
-            aria-hidden
-          />
+        <div className="flex flex-wrap gap-2">
+          {(["all", ...LOG_SOURCES] as FilterValue[]).map((source) => (
+            <button
+              key={source}
+              type="button"
+              onClick={() => {
+                setFilter(source);
+                loadTimeline(source);
+              }}
+              className={`h-9 rounded-md px-3 text-xs font-semibold transition ${
+                filter === source
+                  ? "bg-cyan-300 text-slate-950"
+                  : "border border-white/10 bg-white/5 text-slate-300 hover:bg-white/10"
+              }`}
+            >
+              {source === "all" ? "All sources" : source}
+            </button>
+          ))}
         </div>
       </section>
 

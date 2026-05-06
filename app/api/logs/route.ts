@@ -1,19 +1,31 @@
 import { NextResponse } from "next/server";
-import { deleteLog, getLogs, insertLogs, replaceProcessedLogs, updateLog } from "@/lib/logs";
-import { reconcileLogs, toLogRecord } from "@/lib/reconciliation";
+import { deleteLog, getLogs, insertLogs, updateLog } from "@/lib/logs";
+import { toLogRecord } from "@/lib/reconciliation";
+import { runAndSaveReconciliation } from "@/lib/reconciliation-store";
 
 export const runtime = "nodejs";
 
 async function rebuildTimeline() {
-  const logs = await getLogs();
-  return replaceProcessedLogs(reconcileLogs(logs));
+  const run = await runAndSaveReconciliation();
+  return run.cleanedLogs;
+}
+
+export async function GET(request: Request) {
+  try {
+    const { searchParams } = new URL(request.url);
+    const source = searchParams.get("source") ?? "all";
+    const logs = await getLogs(source);
+    return NextResponse.json({ logs });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Unable to load logs.";
+    return NextResponse.json({ error: message }, { status: 500 });
+  }
 }
 
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const [log] = reconcileLogs([toLogRecord(body)]);
-    const [created] = await insertLogs([log]);
+    const [created] = await insertLogs([toLogRecord(body)]);
     const logs = await rebuildTimeline();
 
     return NextResponse.json({ log: created, logs }, { status: 201 });
@@ -30,8 +42,7 @@ export async function PATCH(request: Request) {
       return NextResponse.json({ error: "Missing log id." }, { status: 400 });
     }
 
-    const [log] = reconcileLogs([toLogRecord(body)]);
-    const updated = await updateLog(body.id, log);
+    const updated = await updateLog(body.id, toLogRecord(body));
 
     if (!updated) {
       return NextResponse.json({ error: "Log not found." }, { status: 404 });

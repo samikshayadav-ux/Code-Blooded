@@ -6,6 +6,7 @@ import {
   BarChart3,
   ChevronLeft,
   FilePenLine,
+  GitCompareArrows,
   Home,
   Lightbulb,
   ListPlus,
@@ -20,6 +21,7 @@ import { ThemeToggle } from "@/components/theme-toggle";
 
 const navItems = [
   { href: "/dashboard", label: "Dashboard", icon: Home },
+  { href: "/reconciliation", label: "Reconciliation", icon: GitCompareArrows },
   { href: "/timeline", label: "Timeline", icon: Workflow },
   { href: "/logs", label: "Logs", icon: BarChart3 },
   { href: "/logs?mode=create", label: "Add Log", icon: ListPlus, child: true },

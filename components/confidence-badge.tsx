@@ -5,8 +5,9 @@ type ConfidenceBadgeProps = {
 };
 
 export function ConfidenceBadge({ confidence }: ConfidenceBadgeProps) {
+  const score = confidence <= 1 ? Math.round(confidence * 100) : Math.round(confidence);
   const level =
-    confidence >= 0.8 ? "high" : confidence >= 0.55 ? "medium" : "low";
+    score >= 90 ? "high" : score >= 60 ? "medium" : "low";
 
   return (
     <span
@@ -17,7 +18,7 @@ export function ConfidenceBadge({ confidence }: ConfidenceBadgeProps) {
         level === "low" && "bg-rose-400/15 text-rose-300 ring-1 ring-rose-400/30"
       )}
     >
-      {Math.round(confidence * 100)}%
+      {score}%
     </span>
   );
 }

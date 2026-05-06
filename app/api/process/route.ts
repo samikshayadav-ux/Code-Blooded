@@ -1,20 +1,20 @@
 import { NextResponse } from "next/server";
-import { getLogs, replaceProcessedLogs } from "@/lib/logs";
-import { buildInsights, buildSourceStats, reconcileLogs } from "@/lib/reconciliation";
+import { runAndSaveReconciliation } from "@/lib/reconciliation-store";
 
 export const runtime = "nodejs";
 
 export async function POST() {
   try {
-    const currentLogs = await getLogs();
-    const processedLogs = reconcileLogs(currentLogs);
-    const savedLogs = await replaceProcessedLogs(processedLogs);
+    const run = await runAndSaveReconciliation();
 
     return NextResponse.json({
-      processed: savedLogs.length,
-      logs: savedLogs,
-      insights: buildInsights(savedLogs),
-      sourceStats: buildSourceStats(savedLogs)
+      processed: run.cleanedLogs.length,
+      logs: run.cleanedLogs,
+      rawLogs: run.rawLogs,
+      cleanedLogs: run.cleanedLogs,
+      insights: run.insights,
+      sourceStats: run.sourceStats,
+      summary: run.summary
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Processing failed.";

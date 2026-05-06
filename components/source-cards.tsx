@@ -49,7 +49,7 @@ export function SourceCards({ stats }: SourceCardsProps) {
               <div className="rounded-md bg-black/20 p-2">
                 <p className="text-slate-500">Avg confidence</p>
                 <p className="mt-1 font-semibold text-emerald-200">
-                  {Math.round((stat?.averageConfidence ?? 0) * 100)}%
+                  {Math.round(stat?.averageConfidence ?? 0)}%
                 </p>
               </div>
             </div>

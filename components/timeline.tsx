@@ -7,8 +7,9 @@ type TimelineProps = {
 
 export function Timeline({ logs }: TimelineProps) {
   const confidenceTone = (confidence: number) => {
-    if (confidence >= 0.8) return "bg-emerald-300 shadow-[0_0_18px_rgba(110,231,183,0.55)]";
-    if (confidence >= 0.55) return "bg-amber-300 shadow-[0_0_18px_rgba(252,211,77,0.55)]";
+    const score = confidence <= 1 ? confidence * 100 : confidence;
+    if (score >= 90) return "bg-emerald-300 shadow-[0_0_18px_rgba(110,231,183,0.55)]";
+    if (score >= 60) return "bg-amber-300 shadow-[0_0_18px_rgba(252,211,77,0.55)]";
     return "bg-rose-300 shadow-[0_0_18px_rgba(253,164,175,0.55)]";
   };
 
@@ -69,17 +70,34 @@ export function Timeline({ logs }: TimelineProps) {
                           )}
                           <button
                             type="button"
+                            title="Confidence shows trust in the reconciled event after anomaly correction."
                             className={`size-5 rounded-full ring-4 ring-slate-950/70 transition duration-300 group-hover:scale-125 ${confidenceTone(log.confidence)}`}
-                            aria-label={`${log.event} confidence ${Math.round(log.confidence * 100)} percent`}
+                            aria-label={`${log.event} confidence ${Math.round(log.confidence <= 1 ? log.confidence * 100 : log.confidence)} percent`}
                           />
                           <div className="pointer-events-none absolute bottom-8 left-1/2 z-10 w-64 -translate-x-1/2 rounded-lg border border-white/10 bg-slate-950/95 p-3 text-left opacity-0 shadow-2xl transition duration-200 group-hover:opacity-100">
                             <p className="text-sm font-semibold text-white">{log.event}</p>
                             <p className="mt-1 font-mono text-xs text-cyan-200">{time.toISOString()}</p>
                             <p className="mt-2 text-xs capitalize text-slate-400">
-                              {log.status} · {Math.round(log.confidence * 100)}% confidence
+                              {log.status} · {Math.round(log.confidence <= 1 ? log.confidence * 100 : log.confidence)}% confidence
                             </p>
                             <p className="mt-1 text-xs text-slate-500">
-                              Correlation: {log.correlationId || "none"}
+                              <span title="correlationId groups related service events into one workflow trace.">
+                                Correlation: {log.correlationId || "none"}
+                              </span>
+                            </p>
+                            <p
+                              title={
+                                log.predicted
+                                  ? "Inferred means the engine predicted a missing expected workflow event."
+                                  : log.status === "duplicate"
+                                    ? "Duplicate means the raw input repeated the same event identity."
+                                    : log.status === "causal-gap"
+                                      ? "Causal-gap means the event was not fully linked to the expected workflow context."
+                                      : "Status assigned by the reconciliation engine."
+                              }
+                              className="mt-1 text-xs text-slate-500"
+                            >
+                              {log.predicted ? "Inferred event" : "Repaired event"}
                             </p>
                           </div>
                         </div>

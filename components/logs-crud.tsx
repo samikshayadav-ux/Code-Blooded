@@ -35,7 +35,7 @@ export function LogsCrud() {
   );
 
   async function refreshLogs() {
-    const response = await fetch("/api/timeline?source=all");
+    const response = await fetch("/api/logs?source=all");
     const data = await response.json();
 
     if (!response.ok) {
@@ -257,7 +257,9 @@ export function LogsCrud() {
                   <span className="rounded-md bg-white/8 px-2 py-1 text-xs text-slate-300">{log.source}</span>
                 </div>
                 <p className="mt-2 font-mono text-xs text-cyan-200">{log.normalizedTimestamp}</p>
-                <p className="mt-1 text-xs capitalize text-slate-500">{log.status} · {Math.round(log.confidence * 100)}% confidence</p>
+                <p className="mt-1 text-xs capitalize text-slate-500">
+                  {log.status} · {Math.round(log.confidence <= 1 ? log.confidence * 100 : log.confidence)}% confidence
+                </p>
               </button>
             ))}
           </div>

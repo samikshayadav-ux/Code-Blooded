@@ -1,13 +1,26 @@
-import { LOG_SOURCES, type AnomalyInsight, type LogRecord, type LogSource, type LogStatus, type SourceStat } from "@/lib/types";
+import {
+  LOG_SOURCES,
+  type AnomalyInsight,
+  type LogRecord,
+  type LogSource,
+  type LogStatus,
+  type ReconciliationRun,
+  type ReconciliationSummary,
+  type SourceStat
+} from "@/lib/types";
 
-const SOURCE_ORDER: Record<LogSource, number> = {
-  "Auth Service": 1,
-  "Payment Service": 2,
-  "Inventory Service": 3,
-  "Notification Service": 4
-};
+const WORKFLOW: Array<{ source: LogSource; event: string; label: string }> = [
+  { source: "Auth Service", event: "auth.completed", label: "Auth" },
+  { source: "Payment Service", event: "payment.authorized", label: "Payment" },
+  { source: "Inventory Service", event: "inventory.reserved", label: "Inventory" },
+  { source: "Notification Service", event: "notification.sent", label: "Notification" }
+];
+
+const SOURCE_ORDER = Object.fromEntries(WORKFLOW.map((step, index) => [step.source, index])) as Record<LogSource, number>;
+const EMPTY_METADATA_PENALTY = 10;
 
 type RawLogInput = Record<string, unknown>;
+type MutableLog = LogRecord & { rawIndex: number };
 
 function isLogSource(value: unknown): value is LogSource {
   return typeof value === "string" && LOG_SOURCES.includes(value as LogSource);
@@ -15,7 +28,6 @@ function isLogSource(value: unknown): value is LogSource {
 
 function normalizeSource(value: unknown): LogSource {
   if (isLogSource(value)) return value;
-
   if (typeof value !== "string") return "Auth Service";
 
   const normalized = value.trim().toLowerCase().replace(/[_\s]+/g, "-");
@@ -46,23 +58,25 @@ function text(value: unknown, fallback: string) {
 
 function numberValue(value: unknown) {
   if (typeof value === "number" && Number.isFinite(value)) return value;
-  if (typeof value === "string" && value.trim() && !Number.isNaN(Number(value))) {
-    return Number(value);
-  }
+  if (typeof value === "string" && value.trim() && !Number.isNaN(Number(value))) return Number(value);
   return undefined;
 }
 
-export function toLogRecord(input: RawLogInput): LogRecord {
-  const source = normalizeSource(input.source ?? input.service);
-  const rawTimestamp = text(
-    input.rawTimestamp ?? input.timestamp ?? input.time ?? input.createdAt,
-    new Date().toISOString()
-  );
+function normalizeConfidence(value: unknown) {
+  const parsed = numberValue(value);
+  if (typeof parsed !== "number") return 100;
+  return Math.max(0, Math.min(100, parsed <= 1 ? parsed * 100 : parsed));
+}
 
-  const metadata = Object.fromEntries(
+function metadataFrom(input: RawLogInput) {
+  const metadata = input.metadata && typeof input.metadata === "object" && !Array.isArray(input.metadata)
+    ? (input.metadata as Record<string, unknown>)
+    : {};
+  const topLevelMetadata = Object.fromEntries(
     Object.entries(input).filter(
       ([key]) =>
         ![
+          "_id",
           "source",
           "service",
           "event",
@@ -71,163 +85,357 @@ export function toLogRecord(input: RawLogInput): LogRecord {
           "timestamp",
           "time",
           "createdAt",
+          "updatedAt",
           "confidence",
           "status",
           "eventId",
           "id",
           "correlationId",
           "traceId",
-          "sequence"
+          "sequence",
+          "metadata",
+          "predicted",
+          "reconciliationNotes"
         ].includes(key)
     )
   );
 
+  return { ...topLevelMetadata, ...metadata };
+}
+
+function stableHash(value: string) {
+  let hash = 0;
+  for (let index = 0; index < value.length; index += 1) {
+    hash = (hash * 31 + value.charCodeAt(index)) >>> 0;
+  }
+  return hash.toString(36);
+}
+
+function metadataCompleteness(log: LogRecord) {
+  return Object.values(log.metadata ?? {}).filter((value) => value !== undefined && value !== null && value !== "").length;
+}
+
+function hasMissingMetadata(log: LogRecord) {
+  return metadataCompleteness(log) === 0;
+}
+
+function workflowIndex(log: Pick<LogRecord, "source" | "sequence">) {
+  return typeof log.sequence === "number" ? log.sequence - 1 : SOURCE_ORDER[log.source];
+}
+
+function eventLabel(log: Pick<LogRecord, "source" | "event">) {
+  const step = WORKFLOW.find((item) => item.source === log.source);
+  return step?.label ?? log.event;
+}
+
+function confidenceColor(score: number): ReconciliationSummary["rawConfidenceColor"] {
+  if (score >= 90) return "green";
+  if (score >= 60) return "yellow";
+  return "red";
+}
+
+function addStatus(log: LogRecord, status: LogStatus, note: string) {
+  log.status = status;
+  log.reconciliationNotes = Array.from(new Set([...(log.reconciliationNotes ?? []), note]));
+}
+
+function duplicateKey(log: LogRecord) {
+  return [log.correlationId, log.eventId, log.source, log.event, log.sequence ?? "", log.normalizedTimestamp].join("|");
+}
+
+function timestampConflictKey(log: LogRecord) {
+  return [log.correlationId, log.eventId || log.event, log.source].join("|");
+}
+
+function mergeDuplicate(candidate: MutableLog, current: MutableLog) {
+  const candidateScore = metadataCompleteness(candidate);
+  const currentScore = metadataCompleteness(current);
+  if (candidateScore <= currentScore) return current;
+
   return {
-    source,
-    event: text(input.event ?? input.message, "unknown.event"),
-    rawTimestamp,
-    normalizedTimestamp: normalizeTimestamp(rawTimestamp),
-    metadata,
-    confidence: numberValue(input.confidence) ?? 1,
-    status: "normal",
-    eventId: text(input.eventId ?? input.id, ""),
-    correlationId: text(input.correlationId ?? input.traceId, ""),
-    sequence: numberValue(input.sequence)
+    ...candidate,
+    reconciliationNotes: Array.from(
+      new Set([...(current.reconciliationNotes ?? []), ...(candidate.reconciliationNotes ?? []), "Kept this duplicate because it has the most complete metadata."])
+    )
   };
 }
 
-function fingerprint(log: LogRecord) {
-  return [log.source, log.event, log.normalizedTimestamp].join("|");
+function inferredTimestamp(before?: LogRecord, after?: LogRecord) {
+  if (before && after) {
+    const midpoint = Math.round((new Date(before.normalizedTimestamp).getTime() + new Date(after.normalizedTimestamp).getTime()) / 2);
+    return new Date(midpoint).toISOString();
+  }
+  if (before) return new Date(new Date(before.normalizedTimestamp).getTime() + 1000).toISOString();
+  if (after) return new Date(new Date(after.normalizedTimestamp).getTime() - 1000).toISOString();
+  return new Date().toISOString();
 }
 
-function withConfidence(statuses: Set<LogStatus>, baseConfidence: number) {
-  let confidence = Math.min(1, Math.max(0, baseConfidence));
-  if (statuses.has("duplicate")) confidence -= 0.34;
-  if (statuses.has("missing")) confidence -= 0.28;
-  if (statuses.has("out-of-order")) confidence -= 0.22;
-  if (statuses.has("causal-gap")) confidence -= 0.18;
-  return Math.max(0.08, Number(confidence.toFixed(2)));
+export function toLogRecord(input: RawLogInput): LogRecord {
+  const source = normalizeSource(input.source ?? input.service);
+  const rawTimestamp = text(input.rawTimestamp ?? input.timestamp ?? input.time ?? input.createdAt, new Date().toISOString());
+  const correlationId = text(input.correlationId ?? input.traceId, "");
+  const normalizedTimestamp = normalizeTimestamp(rawTimestamp);
+
+  return {
+    _id: text(input._id ?? input.id, "") || undefined,
+    source,
+    event: text(input.event ?? input.message, WORKFLOW.find((step) => step.source === source)?.event ?? "unknown.event"),
+    rawTimestamp,
+    normalizedTimestamp,
+    metadata: metadataFrom(input),
+    confidence: normalizeConfidence(input.confidence),
+    status: "normal",
+    predicted: Boolean(input.predicted),
+    reconciliationNotes: Array.isArray(input.reconciliationNotes) ? input.reconciliationNotes.map(String) : [],
+    eventId: text(input.eventId ?? input.id, ""),
+    correlationId,
+    sequence: numberValue(input.sequence),
+    createdAt: text(input.createdAt, "") || undefined,
+    updatedAt: text(input.updatedAt, "") || undefined
+  };
 }
 
-function dominantStatus(statuses: Set<LogStatus>): LogStatus {
-  if (statuses.has("duplicate")) return "duplicate";
-  if (statuses.has("missing")) return "missing";
-  if (statuses.has("out-of-order")) return "out-of-order";
-  if (statuses.has("causal-gap")) return "causal-gap";
-  return "normal";
-}
+export function reconcileLogs(rawInputLogs: LogRecord[]): ReconciliationRun {
+  const rawLogs = rawInputLogs.map((log) => ({ ...toLogRecord(log as unknown as RawLogInput), _id: log._id }));
+  const missingCorrelationIds = rawLogs.filter((log) => !log.correlationId).length;
+  const missingMetadata = rawLogs.filter(hasMissingMetadata).length;
 
-export function reconcileLogs(inputLogs: LogRecord[]) {
-  const seen = new Map<string, number>();
-  const statusesByIndex = inputLogs.map(() => new Set<LogStatus>(["normal"]));
+  const normalizedLogs: MutableLog[] = rawLogs.map((log, rawIndex) => {
+    const nextLog: MutableLog = {
+      ...log,
+      rawIndex,
+      normalizedTimestamp: normalizeTimestamp(log.rawTimestamp ?? log.normalizedTimestamp),
+      confidence: 100,
+      reconciliationNotes: [...(log.reconciliationNotes ?? [])]
+    };
 
-  inputLogs.forEach((log, index) => {
-    const key = fingerprint(log);
-    if (seen.has(key)) {
-      statusesByIndex[index].add("duplicate");
-      statusesByIndex[seen.get(key)!].add("duplicate");
-    } else {
-      seen.set(key, index);
+    if (!nextLog.correlationId) {
+      nextLog.correlationId = `generated-${stableHash(`${nextLog.source}|${nextLog.event}|${nextLog.normalizedTimestamp}|${rawIndex}`)}`;
+      addStatus(nextLog, "causal-gap", "Generated a missing correlationId so the event can be reconciled.");
     }
+    if (hasMissingMetadata(nextLog)) {
+      addStatus(nextLog, "metadata-missing", "Metadata is missing or empty.");
+    }
+
+    return nextLog;
   });
 
-  const bySource = new Map<LogSource, LogRecord[]>();
-  inputLogs.forEach((log) => {
-    bySource.set(log.source, [...(bySource.get(log.source) ?? []), log]);
+  let timestampConflictsResolved = 0;
+  const byConflictKey = new Map<string, MutableLog[]>();
+  normalizedLogs.forEach((log) => {
+    const key = timestampConflictKey(log);
+    byConflictKey.set(key, [...(byConflictKey.get(key) ?? []), log]);
   });
-
-  bySource.forEach((logs) => {
-    logs
-      .filter((log) => typeof log.sequence === "number")
-      .sort((a, b) => (a.sequence ?? 0) - (b.sequence ?? 0))
-      .forEach((log, sortedIndex, sortedLogs) => {
-        const previous = sortedLogs[sortedIndex - 1];
-        if (previous && (log.sequence ?? 0) - (previous.sequence ?? 0) > 1) {
-          const index = inputLogs.indexOf(log);
-          statusesByIndex[index].add("missing");
-        }
+  byConflictKey.forEach((logs) => {
+    const uniqueTimes = new Set(logs.map((log) => log.normalizedTimestamp));
+    if (logs.length > 1 && uniqueTimes.size > 1) {
+      timestampConflictsResolved += logs.length;
+      const best = logs.slice().sort((a, b) => metadataCompleteness(b) - metadataCompleteness(a))[0];
+      logs.forEach((log) => {
+        log.normalizedTimestamp = best.normalizedTimestamp;
+        addStatus(log, "timestamp-conflict", "Resolved conflicting timestamps for matching event identity.");
       });
-  });
-
-  inputLogs.forEach((log, index) => {
-    const previous = inputLogs[index - 1];
-    if (previous && new Date(log.normalizedTimestamp) < new Date(previous.normalizedTimestamp)) {
-      statusesByIndex[index].add("out-of-order");
     }
   });
 
-  const byCorrelation = new Map<string, LogRecord[]>();
-  inputLogs.forEach((log) => {
-    if (!log.correlationId) return;
-    byCorrelation.set(log.correlationId, [...(byCorrelation.get(log.correlationId) ?? []), log]);
+  const duplicateMap = new Map<string, MutableLog>();
+  let duplicatesRemoved = 0;
+  normalizedLogs.forEach((log) => {
+    const key = duplicateKey(log);
+    const existing = duplicateMap.get(key);
+    if (!existing) {
+      duplicateMap.set(key, log);
+      return;
+    }
+    duplicatesRemoved += 1;
+    duplicateMap.set(key, mergeDuplicate(log, existing));
   });
 
-  byCorrelation.forEach((logs) => {
-    const ordered = logs.sort((a, b) => SOURCE_ORDER[a.source] - SOURCE_ORDER[b.source]);
+  const dedupedLogs = Array.from(duplicateMap.values());
+  const grouped = new Map<string, MutableLog[]>();
+  dedupedLogs.forEach((log) => {
+    grouped.set(log.correlationId ?? "uncorrelated", [...(grouped.get(log.correlationId ?? "uncorrelated") ?? []), log]);
+  });
+
+  let missingEventsInferred = 0;
+  const cleanedLogs: LogRecord[] = [];
+  grouped.forEach((logs, correlationId) => {
+    const expectedRange = WORKFLOW;
+    const presentSources = new Set(logs.map((log) => log.source));
+    const groupLogs: LogRecord[] = [...logs];
+
+    expectedRange.forEach((step, index) => {
+      if (presentSources.has(step.source)) return;
+      const before = groupLogs.find((log) => workflowIndex(log) < index);
+      const after = groupLogs.find((log) => workflowIndex(log) > index);
+      const timestamp = inferredTimestamp(before, after);
+      missingEventsInferred += 1;
+      groupLogs.push({
+        source: step.source,
+        event: step.event,
+        rawTimestamp: timestamp,
+        normalizedTimestamp: timestamp,
+        metadata: { inferred: true, reason: "Expected workflow event was missing from raw logs." },
+        confidence: 100,
+        status: "predicted",
+        predicted: true,
+        reconciliationNotes: [`Inferred missing ${step.label} event from surrounding workflow context.`],
+        eventId: `predicted-${stableHash(`${correlationId}|${step.source}|${step.event}`)}`,
+        correlationId,
+        sequence: index + 1
+      });
+    });
+
+    const ordered = groupLogs.sort((a, b) => {
+      const causal = workflowIndex(a) - workflowIndex(b);
+      if (causal !== 0) return causal;
+      return new Date(a.normalizedTimestamp).getTime() - new Date(b.normalizedTimestamp).getTime();
+    });
+
     ordered.forEach((log, index) => {
       const previous = ordered[index - 1];
       if (!previous) return;
       const previousTime = new Date(previous.normalizedTimestamp).getTime();
       const currentTime = new Date(log.normalizedTimestamp).getTime();
-      if (currentTime < previousTime) {
-        statusesByIndex[inputLogs.indexOf(log)].add("causal-gap");
+      if (currentTime <= previousTime) {
+        timestampConflictsResolved += 1;
+        log.normalizedTimestamp = new Date(previousTime + 1).toISOString();
+        addStatus(log, log.predicted ? "predicted" : "timestamp-conflict", "Adjusted timestamp to preserve causal order.");
       }
     });
+
+    cleanedLogs.push(...ordered);
   });
 
-  const processed = inputLogs
-    .map((log, index) => {
-      statusesByIndex[index].delete("normal");
-      const statuses = statusesByIndex[index];
-      const baseConfidence = log.status === "normal" ? log.confidence : 1;
-      return {
-        ...log,
-        status: dominantStatus(statuses),
-        confidence: withConfidence(statuses, baseConfidence)
-      };
-    })
-    .sort(
-      (a, b) =>
-        new Date(a.normalizedTimestamp).getTime() - new Date(b.normalizedTimestamp).getTime() ||
-        SOURCE_ORDER[a.source] - SOURCE_ORDER[b.source]
-    );
+  const rawPositions = new Map(dedupedLogs.map((log, index) => [log, index]));
+  let eventsReordered = 0;
+  cleanedLogs.forEach((log, index) => {
+    const rawPosition = rawPositions.get(log as MutableLog);
+    if (typeof rawPosition === "number" && rawPosition !== index) {
+      eventsReordered += 1;
+      addStatus(log, log.status === "normal" ? "out-of-order" : log.status, "Moved into causal workflow order.");
+    }
+  });
 
-  return processed;
+  const rawPenalty =
+    duplicatesRemoved * 30 +
+    eventsReordered * 25 +
+    missingCorrelationIds * 20 +
+    missingMetadata * EMPTY_METADATA_PENALTY +
+    timestampConflictsResolved * 15 +
+    missingEventsInferred * 20;
+  const rawConfidenceScore = Math.max(
+    0,
+    100 - rawPenalty
+  );
+  const repairCredit =
+    duplicatesRemoved * 24 +
+    eventsReordered * 22 +
+    timestampConflictsResolved * 14 +
+    missingEventsInferred * 16;
+  const unrepairedPenalty = missingCorrelationIds * 8 + missingMetadata * 5;
+  const reconciledConfidenceScore = Math.max(
+    0,
+    Math.min(100, rawConfidenceScore + repairCredit - unrepairedPenalty)
+  );
+  const lowConfidenceReasons = [
+    duplicatesRemoved > 0 && `${duplicatesRemoved} duplicate ${duplicatesRemoved === 1 ? "log was" : "logs were"} removed.`,
+    eventsReordered > 0 && `${eventsReordered} event ${eventsReordered === 1 ? "was" : "were"} reordered.`,
+    missingCorrelationIds > 0 && `${missingCorrelationIds} log ${missingCorrelationIds === 1 ? "was" : "were"} missing correlationId.`,
+    missingMetadata > 0 && `${missingMetadata} log ${missingMetadata === 1 ? "was" : "were"} missing metadata.`,
+    timestampConflictsResolved > 0 && `${timestampConflictsResolved} timestamp ${timestampConflictsResolved === 1 ? "conflict was" : "conflicts were"} resolved.`,
+    missingEventsInferred > 0 && `${missingEventsInferred} expected event ${missingEventsInferred === 1 ? "was" : "were"} inferred.`
+  ].filter(Boolean) as string[];
+
+  const scoredLogs = cleanedLogs.map((log) => ({
+    ...log,
+    confidence: log.predicted ? Math.max(45, reconciledConfidenceScore - 12) : reconciledConfidenceScore,
+    reconciliationNotes: log.reconciliationNotes?.length ? log.reconciliationNotes : ["Log reconciled into the canonical timeline."]
+  }));
+
+  const summary: ReconciliationSummary = {
+    rawCount: rawLogs.length,
+    cleanedCount: scoredLogs.length,
+    duplicatesRemoved,
+    eventsReordered,
+    missingEventsInferred,
+    timestampConflictsResolved,
+    missingCorrelationIds,
+    missingMetadata,
+    rawConfidenceScore,
+    reconciledConfidenceScore,
+    rawConfidenceColor: confidenceColor(rawConfidenceScore),
+    reconciledConfidenceColor: confidenceColor(reconciledConfidenceScore),
+    confidenceScore: reconciledConfidenceScore,
+    confidenceColor: confidenceColor(reconciledConfidenceScore),
+    rawSequence: rawLogs.map(eventLabel),
+    reconciledSequence: scoredLogs.map(eventLabel),
+    lowConfidenceReasons
+  };
+
+  return {
+    rawLogs,
+    cleanedLogs: scoredLogs,
+    insights: buildInsights(scoredLogs, summary),
+    sourceStats: buildSourceStats(scoredLogs),
+    summary
+  };
 }
 
-export function buildInsights(logs: LogRecord[]): AnomalyInsight[] {
-  const anomalies = logs.filter((log) => log.status !== "normal");
-  const duplicateCount = anomalies.filter((log) => log.status === "duplicate").length;
-  const missingCount = anomalies.filter((log) => log.status === "missing").length;
-  const outOfOrderCount = anomalies.filter((log) => log.status === "out-of-order").length;
-  const causalGapCount = anomalies.filter((log) => log.status === "causal-gap").length;
+export function buildInsights(logs: LogRecord[], summary?: ReconciliationSummary): AnomalyInsight[] {
+  const insights: AnomalyInsight[] = [];
 
-  return [
-    duplicateCount && {
+  if (summary?.duplicatesRemoved) {
+    insights.push({
       id: "duplicates",
-      title: "Duplicate log signatures",
-      description: `${duplicateCount} records share the same source, event, and normalized timestamp.`,
-      severity: duplicateCount > 3 ? "high" : "medium"
-    },
-    missingCount && {
-      id: "missing",
-      title: "Sequence gaps detected",
-      description: `${missingCount} records indicate skipped sequence numbers inside a source stream.`,
-      severity: "high"
-    },
-    outOfOrderCount && {
-      id: "out-of-order",
-      title: "Out-of-order arrival",
-      description: `${outOfOrderCount} records arrived earlier than the previous raw stream entry after UTC normalization.`,
+      title: "Duplicate removed",
+      description: `${summary.duplicatesRemoved} duplicate ${summary.duplicatesRemoved === 1 ? "record was" : "records were"} removed. The canonical copy keeps the richest metadata available for that event.`,
+      severity: summary.duplicatesRemoved > 2 ? "high" : "medium"
+    });
+  }
+
+  if (summary?.eventsReordered) {
+    insights.push({
+      id: "reordered",
+      title: "Event reordered",
+      description: `${summary.eventsReordered} event ${summary.eventsReordered === 1 ? "was" : "were"} moved into the expected causal sequence: Auth -> Payment -> Inventory -> Notification.`,
       severity: "medium"
-    },
-    causalGapCount && {
-      id: "causal",
-      title: "Causal timeline conflicts",
-      description: `${causalGapCount} records appear before prerequisite service events in the same correlation trace.`,
+    });
+  }
+
+  if (summary?.missingEventsInferred) {
+    insights.push({
+      id: "inferred",
+      title: "Missing event inferred",
+      description: `${summary.missingEventsInferred} expected workflow ${summary.missingEventsInferred === 1 ? "event was" : "events were"} inferred and marked as predicted in the cleaned timeline.`,
       severity: "high"
-    }
-  ].filter(Boolean) as AnomalyInsight[];
+    });
+  }
+
+  if (summary && summary.rawConfidenceScore < 60) {
+    insights.push({
+      id: "low-confidence",
+      title: "Low confidence reason",
+      description: `Raw confidence is low because ${summary.lowConfidenceReasons.join(" ").toLowerCase()} Reconciled confidence is ${summary.reconciledConfidenceScore}% after correction.`,
+      severity: "high"
+    });
+  }
+
+  logs
+    .filter((log) => log.status !== "normal" && !log.predicted)
+    .slice(0, 6)
+    .forEach((log, index) => {
+      insights.push({
+        id: `log-${index}-${log.eventId ?? log.event}`,
+        title: `${log.source} reconciliation note`,
+        description: `${log.event}: ${(log.reconciliationNotes ?? ["Anomaly detected during reconciliation."]).join(" ")}`,
+        severity: log.confidence < 60 ? "high" : "medium",
+        source: log.source,
+        correlationId: log.correlationId
+      });
+    });
+
+  return insights;
 }
 
 export function buildSourceStats(logs: LogRecord[]): SourceStat[] {
@@ -238,21 +446,21 @@ export function buildSourceStats(logs: LogRecord[]): SourceStat[] {
       source,
       total: sourceLogs.length,
       anomalies: sourceLogs.filter((log) => log.status !== "normal").length,
-      averageConfidence: sourceLogs.length ? Number((confidenceTotal / sourceLogs.length).toFixed(2)) : 0,
+      averageConfidence: sourceLogs.length ? Number((confidenceTotal / sourceLogs.length).toFixed(0)) : 0,
       latestTimestamp: sourceLogs.at(-1)?.normalizedTimestamp
     };
   });
 }
 
 export function generateSampleLogs(): LogRecord[] {
-  return reconcileLogs([
+  return [
     {
       source: "Auth Service",
       event: "user.login",
       rawTimestamp: "2026-05-05T03:40:00-04:00",
       normalizedTimestamp: "2026-05-05T07:40:00.000Z",
       metadata: { userId: "usr_1024", ip: "203.0.113.24" },
-      confidence: 0.97,
+      confidence: 100,
       status: "normal",
       eventId: "evt-001",
       correlationId: "order-8841",
@@ -264,7 +472,7 @@ export function generateSampleLogs(): LogRecord[] {
       rawTimestamp: "2026-05-05T07:40:04Z",
       normalizedTimestamp: "2026-05-05T07:40:04.000Z",
       metadata: { amount: 149.99, currency: "USD" },
-      confidence: 0.94,
+      confidence: 100,
       status: "normal",
       eventId: "evt-002",
       correlationId: "order-8841",
@@ -276,7 +484,7 @@ export function generateSampleLogs(): LogRecord[] {
       rawTimestamp: "2026-05-05T07:39:59Z",
       normalizedTimestamp: "2026-05-05T07:39:59.000Z",
       metadata: { sku: "DLR-14", warehouse: "iad-2" },
-      confidence: 0.88,
+      confidence: 100,
       status: "normal",
       eventId: "evt-003",
       correlationId: "order-8841",
@@ -288,7 +496,7 @@ export function generateSampleLogs(): LogRecord[] {
       rawTimestamp: "2026-05-05T07:40:08Z",
       normalizedTimestamp: "2026-05-05T07:40:08.000Z",
       metadata: { template: "receipt" },
-      confidence: 0.91,
+      confidence: 100,
       status: "normal",
       eventId: "evt-004",
       correlationId: "order-8841",
@@ -300,11 +508,11 @@ export function generateSampleLogs(): LogRecord[] {
       rawTimestamp: "2026-05-05T07:40:04Z",
       normalizedTimestamp: "2026-05-05T07:40:04.000Z",
       metadata: { amount: 149.99, currency: "USD", replay: true },
-      confidence: 0.9,
+      confidence: 100,
       status: "normal",
       eventId: "evt-002",
       correlationId: "order-8841",
       sequence: 2
     }
-  ]);
+  ];
 }

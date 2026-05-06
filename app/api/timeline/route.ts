@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
-import { getLogs, insertLogs } from "@/lib/logs";
-import { buildInsights, buildSourceStats, generateSampleLogs } from "@/lib/reconciliation";
+import { getReconciliationRun } from "@/lib/reconciliation-store";
 
 export const runtime = "nodejs";
 
@@ -8,16 +7,15 @@ export async function GET(request: Request) {
   try {
     const { searchParams } = new URL(request.url);
     const source = searchParams.get("source") ?? "all";
-    let logs = await getLogs(source);
-
-    if (logs.length === 0 && source === "all") {
-      logs = await insertLogs(generateSampleLogs());
-    }
+    const run = await getReconciliationRun(source);
 
     return NextResponse.json({
-      logs,
-      insights: buildInsights(logs),
-      sourceStats: buildSourceStats(logs)
+      logs: run.cleanedLogs,
+      rawLogs: run.rawLogs,
+      cleanedLogs: run.cleanedLogs,
+      insights: run.insights,
+      sourceStats: run.sourceStats,
+      summary: run.summary
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Timeline lookup failed.";

@@ -1,9 +1,89 @@
 import { NextResponse } from "next/server";
 import Papa from "papaparse";
 import { insertLogs } from "@/lib/logs";
-import { reconcileLogs, toLogRecord } from "@/lib/reconciliation";
+import { toLogRecord } from "@/lib/reconciliation";
+import { runAndSaveReconciliation } from "@/lib/reconciliation-store";
 
 export const runtime = "nodejs";
+
+const CSV_FIELD_ALIASES: Record<string, string> = {
+  source: "service",
+  service: "service",
+  event: "event",
+  message: "event",
+  timestamp: "timestamp",
+  rawtimestamp: "timestamp",
+  time: "timestamp",
+  createdat: "timestamp",
+  correlationid: "correlationId",
+  traceid: "correlationId",
+  sequence: "sequence",
+  metadata: "metadata"
+};
+
+function normalizeCsvKey(key: string) {
+  return key.trim().toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+function parseMetadata(value: unknown, rowNumber: number) {
+  if (!value) return {};
+  if (typeof value === "object") return value;
+  if (typeof value !== "string") return { value };
+  const trimmed = value.trim();
+  if (!trimmed) return {};
+
+  try {
+    return JSON.parse(trimmed);
+  } catch {
+    throw new Error(`Malformed CSV row ${rowNumber}: metadata must be valid JSON when provided.`);
+  }
+}
+
+function normalizeCsvRows(rows: Record<string, unknown>[]) {
+  if (rows.length === 0) {
+    throw new Error("CSV file is empty.");
+  }
+
+  const required = new Set(["service", "event", "timestamp"]);
+  return rows.map((row, index) => {
+    const normalized: Record<string, unknown> = {};
+    const metadata: Record<string, unknown> = {};
+
+    Object.entries(row).forEach(([rawKey, rawValue]) => {
+      const mappedKey = CSV_FIELD_ALIASES[normalizeCsvKey(rawKey)];
+      const value = typeof rawValue === "string" ? rawValue.trim() : rawValue;
+      if (value === "" || value === undefined || value === null) return;
+
+      if (!mappedKey) {
+        metadata[rawKey.trim()] = value;
+        return;
+      }
+
+      if (mappedKey === "metadata") {
+        Object.assign(metadata, parseMetadata(value, index + 2));
+        return;
+      }
+
+      normalized[mappedKey] = mappedKey === "sequence" ? Number(value) : value;
+    });
+
+    required.forEach((field) => {
+      if (!normalized[field]) {
+        throw new Error(`Malformed CSV row ${index + 2}: missing ${field}.`);
+      }
+    });
+
+    if (normalized.sequence !== undefined && Number.isNaN(normalized.sequence)) {
+      throw new Error(`Malformed CSV row ${index + 2}: sequence must be a number.`);
+    }
+
+    if (Number.isNaN(new Date(String(normalized.timestamp)).getTime())) {
+      throw new Error(`Malformed CSV row ${index + 2}: timestamp is invalid.`);
+    }
+
+    return { ...normalized, metadata };
+  });
+}
 
 async function parseUpload(request: Request) {
   const formData = await request.formData();
@@ -38,7 +118,15 @@ async function parseUpload(request: Request) {
       throw new Error(parsed.errors.map((error) => error.message).join(", "));
     }
 
-    return parsed.data;
+    const headers = parsed.meta.fields ?? [];
+    const normalizedHeaders = new Set(headers.map(normalizeCsvKey).map((key) => CSV_FIELD_ALIASES[key]).filter(Boolean));
+    for (const field of ["service", "event", "timestamp"]) {
+      if (!normalizedHeaders.has(field)) {
+        throw new Error(`Malformed CSV: missing required ${field} column.`);
+      }
+    }
+
+    return normalizeCsvRows(parsed.data);
   }
 
   throw new Error("Unsupported file type. Upload a .json, .ndjson, or .csv file.");
@@ -47,12 +135,13 @@ async function parseUpload(request: Request) {
 export async function POST(request: Request) {
   try {
     const rawLogs = await parseUpload(request);
-    const logs = reconcileLogs(rawLogs.map(toLogRecord));
+    const logs = rawLogs.map(toLogRecord);
     const insertedLogs = await insertLogs(logs);
+    await runAndSaveReconciliation();
 
     return NextResponse.json({
       inserted: insertedLogs.length,
-      skipped: logs.length - insertedLogs.length,
+      skipped: 0,
       logs: insertedLogs
     });
   } catch (error) {
